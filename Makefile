@@ -1,23 +1,6 @@
 LARGE_TEST_REPO_DIR:=tests/test_docs_large
 GIT_DESC=$$(git describe)
 JUNIT_FLAGS := --capture=sys -o junit_logging=all
-
-.PHONY: lint-black
-lint-black: ## check python source code formatting issues, with black
-	black --check --diff ./
-
-.PHONY: lint-black-apply
-lint-black-apply: ## apply black's source code formatting suggestions
-	black ./
-
-.PHONY: lint-isort
-lint-isort: ## check imports are organized, with isort
-	isort --check --diff ./
-
-.PHONY: lint-isort-apply
-lint-isort-apply: ## apply isort's imports organization suggestions
-	isort ./
-
 MYPY_ARGS := --ignore-missing-imports \
 			 --disallow-incomplete-defs \
 			 --disallow-untyped-defs \
@@ -26,26 +9,24 @@ MYPY_ARGS := --ignore-missing-imports \
 			 --warn-unused-ignores \
 			 --exclude $(LARGE_TEST_REPO_DIR)/*.py
 
-mypy-host:
+.PHONY: lint
+lint: ## Check the code for linting, formatting, and typing issues with ruff and mypy
+	ruff check
+	ruff format --check
 	mypy $(MYPY_ARGS) dangerzone
-
-mypy-tests:
 	mypy $(MYPY_ARGS) tests
 
-mypy: mypy-host mypy-tests ## check type hints with mypy
-
-.PHONY: lint
-lint: lint-black lint-isort mypy ## check the code with various linters
-
-.PHONY: lint-apply
-format: lint-black-apply lint-isort-apply ## apply all the linter's suggestions
+.PHONY: fix
+fix: ## apply all the suggestions from ruff
+	ruff check --fix
+	ruff format
 
 .PHONY: test
 test:
 	# Make each GUI test run as a separate process, to avoid segfaults due to
 	# shared state.
 	# See more in https://github.com/freedomofpress/dangerzone/issues/493
-	pytest --co -q tests/gui | grep -v ' collected' | xargs -n 1 pytest -v
+	pytest --co -q tests/gui | grep -e '^tests/' | xargs -n 1 pytest -v
 	pytest -v --cov --ignore dev_scripts --ignore tests/gui --ignore tests/test_large_set.py
 
 
@@ -65,6 +46,25 @@ TEST_LARGE_RESULTS:=$(LARGE_TEST_REPO_DIR)/results/junit/commit_$(GIT_DESC).juni
 test-large: test-large-init  ## Run large test set
 	python -m pytest --tb=no tests/test_large_set.py::TestLargeSet -v $(JUNIT_FLAGS) --junitxml=$(TEST_LARGE_RESULTS)
 	python $(TEST_LARGE_RESULTS)/report.py $(TEST_LARGE_RESULTS)
+
+Dockerfile: Dockerfile.env Dockerfile.in
+	poetry run jinja2 Dockerfile.in Dockerfile.env > Dockerfile
+
+.PHONY: build-clean
+build-clean:
+	doit clean
+
+.PHONY: build-macos-intel
+build-macos-intel: build-clean
+	doit -n 8
+
+.PHONY: build-macos-arm
+build-macos-arm: build-clean
+	doit -n 8 macos_build_dmg
+
+.PHONY: build-linux
+build-linux: build-clean
+	doit -n 8 fedora_rpm debian_deb
 
 # Makefile self-help borrowed from the securedrop-client project
 # Explaination of the below shell command should it ever break.

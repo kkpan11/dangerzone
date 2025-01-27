@@ -1,20 +1,16 @@
-import asyncio
 import io
 import logging
 import os
-import shutil
 import subprocess
 import sys
 import zipfile
 from pathlib import Path
-from typing import IO, Optional
+from typing import IO
 
-from ..conversion import errors
 from ..conversion.common import running_on_qubes
-from ..conversion.pixels_to_pdf import PixelsToPDF
 from ..document import Document
 from ..util import get_resource_path
-from .base import PIXELS_TO_PDF_LOG_END, PIXELS_TO_PDF_LOG_START, IsolationProvider
+from .base import IsolationProvider
 
 log = logging.getLogger(__name__)
 
@@ -25,27 +21,13 @@ class Qubes(IsolationProvider):
     def install(self) -> bool:
         return True
 
-    def pixels_to_pdf(
-        self, document: Document, tempdir: str, ocr_lang: Optional[str]
-    ) -> None:
-        def print_progress_wrapper(error: bool, text: str, percentage: float) -> None:
-            self.print_progress(document, error, text, percentage)
+    @staticmethod
+    def is_available() -> bool:
+        return True
 
-        converter = PixelsToPDF(progress_callback=print_progress_wrapper)
-        try:
-            asyncio.run(converter.convert(ocr_lang, tempdir))
-        except (RuntimeError, ValueError) as e:
-            raise errors.UnexpectedConversionError(str(e))
-        finally:
-            if getattr(sys, "dangerzone_dev", False):
-                out = converter.captured_output.decode()
-                text = (
-                    f"Conversion output: (pixels to PDF)\n"
-                    f"{PIXELS_TO_PDF_LOG_START}\n{out}{PIXELS_TO_PDF_LOG_END}"
-                )
-                log.info(text)
-
-        shutil.move(f"{tempdir}/safe-output-compressed.pdf", document.output_filename)
+    @staticmethod
+    def should_wait_install() -> bool:
+        return False
 
     def get_max_parallel_conversions(self) -> int:
         return 1
@@ -96,14 +78,18 @@ class Qubes(IsolationProvider):
         standard streams explicitly, so that we can afterwards use `Popen.wait()` to
         learn if the qube terminated.
 
+        Note that we don't close the stderr stream because we want to read debug logs
+        from it. In the rare case where a qube cannot terminate because it's stuck
+        writing at stderr (this is not the expected behavior), we expect that the
+        process will still be forcefully killed after the soft termination timeout
+        expires.
+
         [1]: https://github.com/freedomofpress/dangerzone/issues/563#issuecomment-2034803232
         """
         if p.stdin:
             p.stdin.close()
         if p.stdout:
             p.stdout.close()
-        if p.stderr:
-            p.stderr.close()
 
     def teleport_dz_module(self, wpipe: IO[bytes]) -> None:
         """Send the dangerzone module to another qube, as a zipfile."""

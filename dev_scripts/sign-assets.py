@@ -11,7 +11,8 @@ log = logging.getLogger(__name__)
 
 
 DZ_ASSETS = [
-    "container.tar.gz",
+    "container-{version}-i686.tar.gz",
+    "container-{version}-arm64.tar.gz",
     "Dangerzone-{version}.msi",
     "Dangerzone-{version}-arm64.dmg",
     "Dangerzone-{version}-i686.dmg",
@@ -94,11 +95,11 @@ def main():
     parser.add_argument(
         "--version",
         required=True,
-        help=f"look for assets with this Dangerzone version",
+        help="look for assets with this Dangerzone version",
     )
     parser.add_argument(
         "dir",
-        help=f"look for assets in this directory",
+        help="look for assets in this directory",
     )
     args = parser.parse_args()
     setup_logging()

@@ -2,25 +2,17 @@ import pathlib
 import platform
 import subprocess
 import sys
+import traceback
 import unicodedata
-from typing import Optional
 
-import appdirs
+try:
+    import platformdirs
+except ImportError:
+    import appdirs as platformdirs
 
 
 def get_config_dir() -> str:
-    return appdirs.user_config_dir("dangerzone")
-
-
-def get_tmp_dir() -> Optional[str]:
-    """Get the parent dir for the Dangerzone temporary dirs.
-
-    This function returns the parent directory where Dangerzone will store its temporary
-    directories. The default behavior is to let Python choose for us (e.g., in `/tmp`
-    for Linux), which is why we return None. However, we still need to define this
-    function in order to be able to set this dir via mocking in our tests.
-    """
-    return None
+    return platformdirs.user_config_dir("dangerzone")
 
 
 def get_resource_path(filename: str) -> str:
@@ -43,6 +35,38 @@ def get_resource_path(filename: str) -> str:
             raise NotImplementedError(f"Unsupported system {platform.system()}")
     resource_path = prefix / filename
     return str(resource_path)
+
+
+def get_tessdata_dir() -> pathlib.Path:
+    if getattr(sys, "dangerzone_dev", False) or platform.system() in (
+        "Windows",
+        "Darwin",
+    ):
+        # Always use the tessdata path from the Dangerzone ./share directory, for
+        # development builds, or in Windows/macOS platforms.
+        return pathlib.Path(get_resource_path("tessdata"))
+
+    # In case of Linux systems, grab the Tesseract data from any of the following
+    # locations. We have found some of the locations through trial and error, whereas
+    # others are taken from the docs:
+    #
+    #     [...] Possibilities are /usr/share/tesseract-ocr/tessdata or
+    #     /usr/share/tessdata or /usr/share/tesseract-ocr/4.00/tessdata. [1]
+    #
+    # [1] https://tesseract-ocr.github.io/tessdoc/Installation.html
+    tessdata_dirs = [
+        pathlib.Path("/usr/share/tessdata/"),  # on some Debian
+        pathlib.Path("/usr/share/tesseract/tessdata/"),  # on Fedora
+        pathlib.Path("/usr/share/tesseract-ocr/tessdata/"),  # ? (documented)
+        pathlib.Path("/usr/share/tesseract-ocr/4.00/tessdata/"),  # on Ubuntu Focal
+        pathlib.Path("/usr/share/tesseract-ocr/5/tessdata/"),  # on Debian Trixie
+    ]
+
+    for dir in tessdata_dirs:
+        if dir.is_dir():
+            return dir
+
+    raise RuntimeError("Tesseract language data are not installed in the system")
 
 
 def get_version() -> str:
@@ -97,3 +121,13 @@ def replace_control_chars(untrusted_str: str, keep_newlines: bool = False) -> st
         else:
             sanitized_str += "�"
     return sanitized_str
+
+
+def format_exception(e: Exception) -> str:
+    # The signature of traceback.format_exception has changed in python 3.10
+    if sys.version_info < (3, 10):
+        output = traceback.format_exception(*sys.exc_info())
+    else:
+        output = traceback.format_exception(e)
+
+    return "".join(output)

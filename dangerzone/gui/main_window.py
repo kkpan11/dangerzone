@@ -1,10 +1,10 @@
 import logging
 import os
 import platform
-import subprocess
 import tempfile
 import typing
 from multiprocessing.pool import ThreadPool
+from pathlib import Path
 from typing import List, Optional
 
 # FIXME: See https://github.com/freedomofpress/dangerzone/issues/320 for more details.
@@ -20,15 +20,13 @@ else:
         from PySide6.QtWidgets import QTextEdit
     except ImportError:
         from PySide2 import QtCore, QtGui, QtSvg, QtWidgets
-        from PySide2.QtWidgets import QAction, QTextEdit
         from PySide2.QtCore import Qt
+        from PySide2.QtWidgets import QAction, QTextEdit
 
 from .. import errors
 from ..document import SAFE_EXTENSION, Document
-from ..isolation_provider.container import Container, NoContainerTechException
-from ..isolation_provider.dummy import Dummy
-from ..isolation_provider.qubes import Qubes, is_qubes_native_conversion
-from ..util import get_resource_path, get_subprocess_startupinfo, get_version
+from ..isolation_provider.qubes import is_qubes_native_conversion
+from ..util import format_exception, get_resource_path, get_version
 from .logic import Alert, CollapsibleBox, DangerzoneGui, UpdateDialog
 from .updater import UpdateReport
 
@@ -55,6 +53,13 @@ about updates.</p>
 
 
 HAMBURGER_MENU_SIZE = 30
+
+
+WARNING_MESSAGE = """\
+<p><b>Warning:</b> Ubuntu Focal systems and their derivatives will
+stop being supported in subsequent Dangerzone releases. We encourage you to upgrade to a
+more recent version of your operating system in order to get security updates.</p>
+"""
 
 
 def load_svg_image(filename: str, width: int, height: int) -> QtGui.QPixmap:
@@ -119,6 +124,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.setWindowTitle("Dangerzone")
         self.setWindowIcon(self.dangerzone.get_window_icon())
+        self.alert: Optional[Alert] = None
 
         self.setMinimumWidth(600)
         if platform.system() == "Darwin":
@@ -186,14 +192,11 @@ class MainWindow(QtWidgets.QMainWindow):
         header_layout.addWidget(self.hamburger_button)
         header_layout.addSpacing(15)
 
-        if isinstance(self.dangerzone.isolation_provider, Container):
+        if self.dangerzone.isolation_provider.should_wait_install():
             # Waiting widget replaces content widget while container runtime isn't available
             self.waiting_widget: WaitingWidget = WaitingWidgetContainer(self.dangerzone)
             self.waiting_widget.finished.connect(self.waiting_finished)
-
-        elif isinstance(self.dangerzone.isolation_provider, Dummy) or isinstance(
-            self.dangerzone.isolation_provider, Qubes
-        ):
+        else:
             # Don't wait with dummy converter and on Qubes.
             self.waiting_widget = WaitingWidget()
             self.dangerzone.is_waiting_finished = True
@@ -223,6 +226,13 @@ class MainWindow(QtWidgets.QMainWindow):
         # thing we have to a top-level container element akin to an HTML `<body>`.
         # This allows us to make QSS rules conditional on the OS color mode.
         self.setProperty("OSColorMode", self.dangerzone.app.os_color_mode.value)
+
+        if hasattr(self.dangerzone.isolation_provider, "check_docker_desktop_version"):
+            is_version_valid, version = (
+                self.dangerzone.isolation_provider.check_docker_desktop_version()
+            )
+            if not is_version_valid:
+                self.handle_docker_desktop_version_check(is_version_valid, version)
 
         self.show()
 
@@ -276,6 +286,46 @@ class MainWindow(QtWidgets.QMainWindow):
         check = self.toggle_updates_action.isChecked()
         self.dangerzone.settings.set("updater_check", check)
         self.dangerzone.settings.save()
+
+    def handle_docker_desktop_version_check(
+        self, is_version_valid: bool, version: str
+    ) -> None:
+        hamburger_menu = self.hamburger_button.menu()
+        sep = hamburger_menu.insertSeparator(hamburger_menu.actions()[0])
+        upgrade_action = QAction("Docker Desktop should be upgraded", hamburger_menu)
+        upgrade_action.setIcon(
+            QtGui.QIcon(
+                load_svg_image(
+                    "hamburger_menu_update_dot_error.svg", width=64, height=64
+                )
+            )
+        )
+
+        message = """
+        <p>A new version of Docker Desktop is available. Please upgrade your system.</p>
+        <p>Visit the <a href="https://www.docker.com/products/docker-desktop">Docker Desktop website</a> to download the latest version.</p>
+        <em>Keeping Docker Desktop up to date allows you to have more confidence that your documents are processed safely.</em>
+        """
+        self.alert = Alert(
+            self.dangerzone,
+            title="Upgrade Docker Desktop",
+            message=message,
+            ok_text="Ok",
+            has_cancel=False,
+        )
+
+        def _launch_alert() -> None:
+            if self.alert:
+                self.alert.launch()
+
+        upgrade_action.triggered.connect(_launch_alert)
+        hamburger_menu.insertAction(sep, upgrade_action)
+
+        self.hamburger_button.setIcon(
+            QtGui.QIcon(
+                load_svg_image("hamburger_menu_update_error.svg", width=64, height=64)
+            )
+        )
 
     def handle_updates(self, report: UpdateReport) -> None:
         """Handle update reports from the update checker thread.
@@ -363,7 +413,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.content_widget.show()
 
     def closeEvent(self, e: QtGui.QCloseEvent) -> None:
-        alert_widget = Alert(
+        self.alert = Alert(
             self.dangerzone,
             message="Some documents are still being converted.\n Are you sure you want to quit?",
             ok_text="Abort conversions",
@@ -377,7 +427,7 @@ class MainWindow(QtWidgets.QMainWindow):
             else:
                 self.dangerzone.app.exit(0)
         else:
-            accept_exit = alert_widget.launch()
+            accept_exit = self.alert.launch()
             if not accept_exit:
                 e.ignore()
                 return
@@ -388,15 +438,24 @@ class MainWindow(QtWidgets.QMainWindow):
 
 
 class InstallContainerThread(QtCore.QThread):
-    finished = QtCore.Signal()
+    finished = QtCore.Signal(str)
 
     def __init__(self, dangerzone: DangerzoneGui) -> None:
         super(InstallContainerThread, self).__init__()
         self.dangerzone = dangerzone
 
     def run(self) -> None:
-        self.dangerzone.isolation_provider.install()
-        self.finished.emit()
+        error = None
+        try:
+            installed = self.dangerzone.isolation_provider.install()
+        except Exception as e:
+            log.error("Container installation problem")
+            error = format_exception(e)
+        else:
+            if not installed:
+                error = "The image cannot be found. This can be caused by a faulty container image."
+        finally:
+            self.finished.emit(error)
 
 
 class WaitingWidget(QtWidgets.QWidget):
@@ -423,9 +482,10 @@ class TracebackWidget(QTextEdit):
         # Enable copying
         self.setTextInteractionFlags(Qt.TextSelectableByMouse)
 
-    def set_content(self, error: str) -> None:
-        self.setPlainText(error)
-        self.setVisible(True)
+    def set_content(self, error: Optional[str] = None) -> None:
+        if error:
+            self.setPlainText(error)
+            self.setVisible(True)
 
 
 class WaitingWidgetContainer(WaitingWidget):
@@ -438,7 +498,6 @@ class WaitingWidgetContainer(WaitingWidget):
     #
     # Linux states
     # - "install_container"
-    finished = QtCore.Signal()
 
     def __init__(self, dangerzone: DangerzoneGui) -> None:
         super(WaitingWidgetContainer, self).__init__()
@@ -480,49 +539,61 @@ class WaitingWidgetContainer(WaitingWidget):
         error: Optional[str] = None
 
         try:
-            if isinstance(  # Sanity check
-                self.dangerzone.isolation_provider, Container
-            ):
-                container_runtime = self.dangerzone.isolation_provider.get_runtime()
-                runtime_name = self.dangerzone.isolation_provider.get_runtime_name()
-        except NoContainerTechException as e:
+            self.dangerzone.isolation_provider.is_available()
+        except errors.NoContainerTechException as e:
             log.error(str(e))
             state = "not_installed"
-
+        except errors.NotAvailableContainerTechException as e:
+            log.error(str(e))
+            state = "not_running"
+            error = e.error
+        except Exception as e:
+            log.error(str(e))
+            state = "not_running"
+            error = format_exception(e)
         else:
-            # Can we run `docker/podman image ls` without an error
-            with subprocess.Popen(
-                [container_runtime, "image", "ls"],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE,
-                startupinfo=get_subprocess_startupinfo(),
-            ) as p:
-                _, stderr = p.communicate()
-                if p.returncode != 0:
-                    log.error(f"{runtime_name} is not running")
-                    state = "not_running"
-                    error = stderr.decode()
-                else:
-                    # Always try installing the container
-                    state = "install_container"
+            state = "install_container"
 
         # Update the state
         self.state_change(state, error)
 
+    def show_error(self, msg: str, details: Optional[str] = None) -> None:
+        self.label.setText(msg)
+        show_traceback = details is not None
+        if show_traceback:
+            self.traceback.set_content(details)
+        self.traceback.setVisible(show_traceback)
+        self.buttons.show()
+
+    def show_message(self, msg: str) -> None:
+        self.label.setText(msg)
+        self.traceback.setVisible(False)
+        self.buttons.hide()
+
+    def installation_finished(self, error: Optional[str] = None) -> None:
+        if error:
+            msg = (
+                "During installation of the dangerzone image, <br>"
+                "the following error occured:"
+            )
+            self.show_error(msg, error)
+        else:
+            self.finished.emit()
+
     def state_change(self, state: str, error: Optional[str] = None) -> None:
         if state == "not_installed":
             if platform.system() == "Linux":
-                self.label.setText(
+                self.show_error(
                     "<strong>Dangerzone requires Podman</strong><br><br>"
                     "Install it and retry."
                 )
             else:
-                self.label.setText(
+                self.show_error(
                     "<strong>Dangerzone requires Docker Desktop</strong><br><br>"
                     "<a href='https://www.docker.com/products/docker-desktop'>Download Docker Desktop</a>"
                     ", install it, and open it."
                 )
-            self.buttons.show()
+
         elif state == "not_running":
             if platform.system() == "Linux":
                 # "not_running" here means that the `podman image ls` command failed.
@@ -530,27 +601,20 @@ class WaitingWidgetContainer(WaitingWidget):
                     "<strong>Dangerzone requires Podman</strong><br><br>"
                     "Podman is installed but cannot run properly. See errors below"
                 )
-                if error:
-                    self.traceback.set_content(error)
-
-                self.label.setText(message)
-
             else:
-                self.label.setText(
+                message = (
                     "<strong>Dangerzone requires Docker Desktop</strong><br><br>"
                     "Docker is installed but isn't running.<br><br>"
                     "Open Docker and make sure it's running in the background."
                 )
-            self.buttons.show()
+            self.show_error(message, error)
         else:
-            self.label.setText(
+            self.show_message(
                 "Installing the Dangerzone container image.<br><br>"
                 "This might take a few minutes..."
             )
-            self.buttons.hide()
-            self.traceback.setVisible(False)
             self.install_container_t = InstallContainerThread(self.dangerzone)
-            self.install_container_t.finished.connect(self.finished)
+            self.install_container_t.finished.connect(self.installation_finished)
             self.install_container_t.start()
 
 
@@ -561,6 +625,17 @@ class ContentWidget(QtWidgets.QWidget):
         super(ContentWidget, self).__init__()
         self.dangerzone = dangerzone
         self.conversion_started = False
+
+        self.warning_label = None
+        if platform.system() == "Linux":
+            # Add the warning message only for ubuntu focal
+            os_release_path = Path("/etc/os-release")
+            if os_release_path.exists():
+                os_release = os_release_path.read_text()
+                if "Ubuntu 20.04" in os_release or "focal" in os_release:
+                    self.warning_label = QtWidgets.QLabel(WARNING_MESSAGE)
+                    self.warning_label.setWordWrap(True)
+                    self.warning_label.setProperty("style", "warning")
 
         # Doc selection widget
         self.doc_selection_widget = DocSelectionWidget(self.dangerzone)
@@ -587,6 +662,8 @@ class ContentWidget(QtWidgets.QWidget):
 
         # Layout
         layout = QtWidgets.QVBoxLayout()
+        if self.warning_label:
+            layout.addWidget(self.warning_label)  # Add warning at the top
         layout.addWidget(self.settings_widget, stretch=1)
         layout.addWidget(self.documents_list, stretch=1)
         layout.addWidget(self.doc_selection_wrapper, stretch=1)
@@ -594,7 +671,7 @@ class ContentWidget(QtWidgets.QWidget):
 
     def documents_selected(self, docs: List[Document]) -> None:
         if self.conversion_started:
-            Alert(
+            self.alert = Alert(
                 self.dangerzone,
                 message="Dangerzone does not support adding documents after the conversion has started.",
                 has_cancel=False,
@@ -604,7 +681,7 @@ class ContentWidget(QtWidgets.QWidget):
         # Ensure all files in batch are in the same directory
         dirnames = {os.path.dirname(doc.input_filename) for doc in docs}
         if len(dirnames) > 1:
-            Alert(
+            self.alert = Alert(
                 self.dangerzone,
                 message="Dangerzone does not support adding documents from multiple locations.\n\n The newly added documents were ignored.",
                 has_cancel=False,
@@ -773,14 +850,14 @@ class DocSelectionDropFrame(QtWidgets.QFrame):
             text = f"{num_unsupported_docs} files are not supported."
             ok_text = "Continue without these files"
 
-        alert_widget = Alert(
+        self.alert = Alert(
             self.dangerzone,
             message=f"{text}\nThe supported extensions are: "
             + ", ".join(get_supported_extensions()),
             ok_text=ok_text,
         )
 
-        return alert_widget.exec_()
+        return self.alert.exec_()
 
 
 class SettingsWidget(QtWidgets.QWidget):

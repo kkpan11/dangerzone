@@ -42,7 +42,7 @@ Install dependencies:
   </br>
 
   The default Python version that ships with Ubuntu Focal (3.8) is not
-  compatible with PySide6, which requires Python 3.9 of greater.
+  compatible with PySide6, which requires Python 3.9 or greater.
 
   You can install Python 3.9 using the `python3.9` package.
 
@@ -70,6 +70,7 @@ methods](https://python-poetry.org/docs/#installation))_
 ```sh
 pipx ensurepath
 pipx install poetry
+pipx inject poetry poetry-plugin-export
 ```
 
 After this, restart the terminal window, for the `poetry` command to be in your
@@ -95,6 +96,12 @@ Build the latest container:
 
 ```sh
 python3 ./install/common/build-image.py
+```
+
+Download the OCR language data:
+
+```sh
+python3 ./install/common/download-tessdata.py
 ```
 
 Run from source tree:
@@ -125,10 +132,33 @@ sudo dnf install -y rpm-build podman python3 python3-devel python3-poetry-core \
     pipx qt6-qtbase-gui
 ```
 
+<table>
+  <tr>
+      <td>
+<details>
+  <summary><i>:memo: Expand this section if you are on Fedora 41.</i></summary>
+  </br>
+
+  The default Python version that ships with Fedora 41 (3.13) is not
+  compatible with PySide6, which requires Python 3.12 or earlier.
+
+  You can install Python 3.12 using the `python3.12` package.
+
+  ```bash
+  sudo dnf install -y python3.12
+  ```
+
+  Poetry will automatically pick up the correct version when running.
+</details>
+    </td>
+  </tr>
+</table>
+
 Install Poetry using `pipx`:
 
 ```sh
 pipx install poetry
+pipx inject poetry poetry-plugin-export
 ```
 
 Clone this repository:
@@ -150,6 +180,12 @@ Build the latest container:
 
 ```sh
 python3 ./install/common/build-image.py
+```
+
+Download the OCR language data:
+
+```sh
+python3 ./install/common/download-tessdata.py
 ```
 
 Run from source tree:
@@ -226,11 +262,17 @@ The following instructions require typing commands in a terminal in dom0.
 
    ```
    qvm-create --class AppVM --label red --template fedora-40-dz dz
+   qvm-volume resize dz:private $(numfmt --from=auto 20Gi)
    ```
 
    > :bulb: Alternatively, you can use a different app qube for Dangerzone
    > development. In that case, replace `dz` with the qube of your choice in the
    > steps below.
+   >
+   > In the commands above, we also resize the private volume of the `dz` qube
+   > to 20GiB, since you may need some extra storage space when developing on
+   > Dangerzone (e.g., for container images, Tesseract data, and Python
+   > virtualenvs).
 
 4. Add an RPC policy (`/etc/qubes/policy.d/50-dangerzone.policy`) that will
    allow launching a disposable qube (`dz-dvm`) when Dangerzone converts a
@@ -256,10 +298,7 @@ test it.
    cd dangerzone
    ```
 
-2. Follow the Fedora instructions for setting up the development environment with the particularity of running the following instead of `poetry install`:
-   ```
-   poetry install --with qubes
-   ```
+2. Follow the Fedora instructions for setting up the development environment.
 
 3. Build a dangerzone `.rpm` for qubes with the command
 
@@ -277,17 +316,8 @@ test it.
 1. Install the `.rpm` package you just copied
 
    ```sh
-   sudo dnf install 'dnf-command(config-manager)'
-   sudo dnf config-manager --add-repo=https://packages.freedom.press/yum-tools-prod/dangerzone/dangerzone.repo
    sudo dnf install ~/QubesIncoming/dz/*.rpm
    ```
-
-   In the above steps, we add the Dangerzone repo because it includes the
-   necessary PySide6 RPM in order to make Dangerzone work.
-
-   > [!NOTE]
-   > During the installation, you will be asked to
-   > [verify the Dangerzone GPG key](INSTALL.md#verifying-dangerzone-gpg-key).
 
 2. Shutdown the `fedora-40-dz` template
 
@@ -341,7 +371,7 @@ cd dangerzone
 Install Python dependencies:
 
 ```sh
-python3 -m pip install poetry
+python3 -m pip install poetry poetry-plugin-export
 poetry install
 ```
 
@@ -355,6 +385,12 @@ Build the dangerzone container image:
 
 ```sh
 python3 ./install/common/build-image.py
+```
+
+Download the OCR language data:
+
+```sh
+python3 ./install/common/download-tessdata.py
 ```
 
 Run from source tree:
@@ -396,7 +432,7 @@ Install Microsoft Visual C++ 14.0 or greater. Get it with ["Microsoft C++ Build 
 Install [poetry](https://python-poetry.org/). Open PowerShell, and run:
 
 ```
-python -m pip install poetry
+python -m pip install poetry poetry-plugin-export
 ```
 
 Install git from [here](https://git-scm.com/download/win), open a Windows terminal (`cmd.exe`) and clone this repository:
@@ -418,6 +454,12 @@ Build the dangerzone container image:
 python3 .\install\common\build-image.py
 ```
 
+Download the OCR language data:
+
+```sh
+python3 .\install\common\download-tessdata.py
+```
+
 After that you can launch dangerzone during development with:
 
 ```
@@ -431,11 +473,24 @@ poetry shell
 .\dev_scripts\dangerzone.bat
 ```
 
-### If you want to build the installer
+### If you want to build the Windows installer
 
-* Go to https://dotnet.microsoft.com/download/dotnet-framework and download and install .NET Framework 3.5 SP1 Runtime. I downloaded `dotnetfx35.exe`.
-* Go to https://wixtoolset.org/releases/ and download and install WiX toolset. I downloaded `wix314.exe`.
-* Add `C:\Program Files (x86)\WiX Toolset v3.14\bin` to the path ([instructions](https://web.archive.org/web/20230221104142/https://windowsloop.com/how-to-add-to-windows-path/)).
+Install [.NET SDK](https://dotnet.microsoft.com/en-us/download) version 6 or later. Then, open a terminal and install the latest version of [WiX Toolset .NET tool](https://wixtoolset.org/) **v5** with:
+
+```sh
+dotnet tool install --global wix --version 5.*
+```
+
+Install the WiX UI extension. You may need to open a new terminal in order to use the newly installed `wix` .NET tool:
+
+```sh
+wix extension add --global WixToolset.UI.wixext/5.x.y
+```
+
+> [!IMPORTANT]
+> To avoid compatibility issues, ensure the WiX UI extension version matches the version of the WiX Toolset.
+>
+> Run `wix --version` to check the version of WiX Toolset you have installed and replace `5.x.y` with the full version number without the Git revision.
 
 ### If you want to sign binaries with Authenticode
 
@@ -460,3 +515,9 @@ poetry run .\install\windows\build-app.bat
 ```
 
 When you're done you will have `dist\Dangerzone.msi`.
+
+## Updating the container image
+
+The Dangezone container image is reproducible. This means that every time we
+build it, the result will be bit-for-bit the same, with some minor exceptions.
+Read more on how you can update it in `docs/developer/reproducibility.md`.

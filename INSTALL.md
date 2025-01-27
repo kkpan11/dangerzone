@@ -1,23 +1,36 @@
 ## MacOS
-See instructions in [README.md](README.md#macos).
+
+- Download [Dangerzone 0.8.1 for Mac (Apple Silicon CPU)](https://github.com/freedomofpress/dangerzone/releases/download/v0.8.1/Dangerzone-0.8.1-arm64.dmg)
+- Download [Dangerzone 0.8.1 for Mac (Intel CPU)](https://github.com/freedomofpress/dangerzone/releases/download/v0.8.1/Dangerzone-0.8.1-i686.dmg)
+
+You can also install Dangerzone for Mac using [Homebrew](https://brew.sh/): `brew install --cask dangerzone`
+
+> **Note**: you will also need to install [Docker Desktop](https://www.docker.com/products/docker-desktop/).
+> This program needs to run alongside Dangerzone at all times, since it is what allows Dangerzone to
+> create the secure environment.
 
 ## Windows
-See instructions in [README.md](README.md#windows).
+
+- Download [Dangerzone 0.8.1 for Windows](https://github.com/freedomofpress/dangerzone/releases/download/v0.8.1/Dangerzone-0.8.1.msi)
+
+> **Note**: you will also need to install [Docker Desktop](https://www.docker.com/products/docker-desktop/).
+> This program needs to run alongside Dangerzone at all times, since it is what allows Dangerzone to
+> create the secure environment.
 
 ## Linux
 On Linux, Dangerzone uses [Podman](https://podman.io/) instead of Docker Desktop for creating
 an isolated environment. It will be installed automatically when installing Dangerzone.
 
 Dangerzone is available for:
+- Ubuntu 24.10 (oracular)
 - Ubuntu 24.04 (noble)
-- Ubuntu 23.10 (mantic)
 - Ubuntu 22.04 (jammy)
 - Ubuntu 20.04 (focal)
 - Debian 13 (trixie)
 - Debian 12 (bookworm)
 - Debian 11 (bullseye)
+- Fedora 41
 - Fedora 40
-- Fedora 39
 - Tails
 - Qubes OS (beta support)
 
@@ -71,9 +84,20 @@ Dangerzone is available for:
   </tr>
 </table>
 
-Add our repository following these instructions:
+First, retrieve the PGP keys.
 
-Download the GPG key for the repo:
+Starting with Trixie, follow these instructions to download the PGP keys:
+
+```bash
+sudo apt-get update && sudo apt-get install sq -y
+mkdir -p /etc/apt/keyrings/
+sq network keyserver \
+   --server hkps://keys.openpgp.org \
+   search "DE28 AB24 1FA4 8260 FAC9 B8BA A7C9 B385 2260 4281" \
+   --output /etc/apt/keyrings/fpf-apt-tools-archive-keyring.gpg
+```
+
+On other Debian-derivatives:
 
 ```sh
 sudo apt-get update && sudo apt-get install gnupg2 ca-certificates -y
@@ -81,10 +105,12 @@ gpg --keyserver hkps://keys.openpgp.org \
     --no-default-keyring --keyring ./fpf-apt-tools-archive-keyring.gpg \
     --recv-keys "DE28 AB24 1FA4 8260 FAC9 B8BA A7C9 B385 2260 4281"
 sudo mkdir -p /etc/apt/keyrings/
-sudo mv fpf-apt-tools-archive-keyring.gpg /etc/apt/keyrings
+sudo gpg --no-default-keyring --keyring ./fpf-apt-tools-archive-keyring.gpg \
+    --armor --export "DE28 AB24 1FA4 8260 FAC9 B8BA A7C9 B385 2260 4281" \
+    > /etc/apt/keyrings/fpf-apt-tools-archive-keyring.gpg
 ```
 
-Add the URL of the repo in your APT sources:
+Then, on all distributions, add the URL of the repo in your APT sources:
 
 ```sh
 . /etc/os-release
@@ -124,28 +150,11 @@ sudo apt install -y dangerzone
 
 ### Fedora
 
-<table>
-  <tr>
-    <td>
-<details>
-  <summary><i>:information_source: Backport notice for Fedora users regarding the <code>python3-pyside6</code> package</i></summary>
-  </br>
-
-  Fedora 39+ onwards does not provide official Python bindings for Qt. For
-  this reason, we provide our own `python3-pyside6` package (see
-  [build instructions](https://github.com/freedomofpress/maint-dangerzone-pyside6))
-  from our YUM repo. For a deeper dive on this subject, you may read
-  [this issue](https://github.com/freedomofpress/dangerzone/issues/211#issuecomment-1827777122).
-</details>
-    </td>
-  </tr>
-</table>
-
 Type the following commands in a terminal:
 
 ```
 sudo dnf install 'dnf-command(config-manager)'
-sudo dnf config-manager --add-repo=https://packages.freedom.press/yum-tools-prod/dangerzone/dangerzone.repo
+sudo dnf-3 config-manager --add-repo=https://packages.freedom.press/yum-tools-prod/dangerzone/dangerzone.repo
 sudo dnf install dangerzone
 ```
 
@@ -232,7 +241,7 @@ dz.Convert         *       @anyvm       @dispvm:dz-dvm  allow
 Install Dangerzone:
 
 ```
-sudo dnf config-manager --add-repo=https://packages.freedom.press/yum-tools-prod/dangerzone/dangerzone.repo
+sudo dnf-3 config-manager --add-repo=https://packages.freedom.press/yum-tools-prod/dangerzone/dangerzone.repo
 sudo dnf install dangerzone-qubes
 ```
 
@@ -288,7 +297,7 @@ Our [GitHub Releases page](https://github.com/freedomofpress/dangerzone/releases
 hosts the following files:
 * Windows installer (`Dangerzone-<version>.msi`)
 * macOS archives (`Dangerzone-<version>-<arch>.dmg`)
-* Container image (`container.tar.gz`)
+* Container images (`container-<version>-<arch>.tar.gz`)
 * Source package (`dangerzone-<version>.tar.gz`)
 
 All these files are accompanied by signatures (as `.asc` files). We'll explain
@@ -313,10 +322,10 @@ gpg --verify Dangerzone-0.6.1-arm64.dmg.asc Dangerzone-0.6.1-arm64.dmg
 gpg --verify Dangerzone-0.6.1-i686.dmg.asc Dangerzone-0.6.1-i686.dmg
 ```
 
-For the container image:
+For the container images:
 
 ```
-gpg --verify container.tar.gz.asc container.tar.gz
+gpg --verify container-0.6.1-i686.tar.gz.asc container-0.6.1-i686.tar.gz
 ```
 
 For the source package:

@@ -7,7 +7,6 @@ from pytest_mock import MockerFixture
 from dangerzone.conversion import errors
 from dangerzone.document import Document
 from dangerzone.isolation_provider import base
-from dangerzone.isolation_provider.qubes import running_on_qubes
 
 TIMEOUT_STARTUP = 60  # Timeout in seconds until the conversion sandbox starts.
 
@@ -29,7 +28,7 @@ class IsolationProviderTest:
 
         p = provider.start_doc_to_pixels_proc(doc)
         with pytest.raises(errors.ConverterProcException):
-            provider.doc_to_pixels(doc, tmpdir, p)
+            provider.convert_with_proc(doc, None, p)
             assert provider.get_proc_exception(p) == errors.MaxPagesException
 
     def test_max_pages_client_enforcement(
@@ -46,7 +45,7 @@ class IsolationProviderTest:
         doc = Document(sample_doc)
         p = provider.start_doc_to_pixels_proc(doc)
         with pytest.raises(errors.MaxPagesException):
-            provider.doc_to_pixels(doc, tmpdir, p)
+            provider.convert_with_proc(doc, None, p)
 
     def test_max_dimensions(
         self,
@@ -60,12 +59,12 @@ class IsolationProviderTest:
         doc = Document(sample_bad_width)
         p = provider.start_doc_to_pixels_proc(doc)
         with pytest.raises(errors.MaxPageWidthException):
-            provider.doc_to_pixels(doc, tmpdir, p)
+            provider.convert_with_proc(doc, None, p)
 
         doc = Document(sample_bad_height)
         p = provider.start_doc_to_pixels_proc(doc)
         with pytest.raises(errors.MaxPageHeightException):
-            provider.doc_to_pixels(doc, tmpdir, p)
+            provider.convert_with_proc(doc, None, p)
 
 
 class IsolationProviderTermination:
@@ -165,6 +164,7 @@ class IsolationProviderTermination:
         terminate_proc_mock = mocker.patch.object(
             provider, "terminate_doc_to_pixels_proc", return_value=None
         )
+        kill_pg_orig = base.kill_process_group
         kill_pg_mock = mocker.patch(
             "dangerzone.isolation_provider.base.kill_process_group", return_value=None
         )
@@ -179,6 +179,7 @@ class IsolationProviderTermination:
 
         # Reset the function to the original state.
         provider.terminate_doc_to_pixels_proc = terminate_proc_orig  # type: ignore [method-assign]
+        base.kill_process_group = kill_pg_orig
 
         # Really kill the spawned process, so that it doesn't linger after the tests
         # complete.

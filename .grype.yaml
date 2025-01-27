@@ -2,47 +2,38 @@
 # latest release of Dangerzone, and offer our analysis.
 
 ignore:
-  - vulnerability: CVE-2024-5535
-  # CVE-2024-5171
-  # =============
-  #
-  # NVD Entry: https://nvd.nist.gov/vuln/detail/CVE-2024-5171
-  # Verdict: Dangerzone is not affected. The rationale is the following:
-  #
-  # The affected library, `libaom.so`, is linked by GStreamer's `libgstaom.so`
-  # library. The vulnerable `aom_img_alloc` function is only used when
-  # **encoding** a video to AV1. LibreOffce uses the **decode** path instead,
-  # when generating thumbnails.
-  #
-  # See also: https://github.com/freedomofpress/dangerzone/issues/895
-  - vulnerability: CVE-2024-5171
-
-  # CVE-2024-45491, CVE-2024-45492
-  # ===============================
-  #
-  # NVD Entries:
-  # * https://nvd.nist.gov/vuln/detail/CVE-2024-45491
-  # * https://nvd.nist.gov/vuln/detail/CVE-2024-45492
-  #
-  # Verdict: Dangerzone is not affected. The rationale is the following:
-  #
-  # The vulnerabilities that have been assigned to these CVEs affect only 32-bit
-  # architectures. Dangerzone ships only 64-bit images to users.
-  #
-  # See also: https://github.com/freedomofpress/dangerzone/issues/913
-  - vulnerability: CVE-2024-45491
-  - vulnerability: CVE-2024-45492
-
-  # CVE-2024-45490
+  # CVE-2023-45853
   # ==============
   #
-  # NVD Entry: https://nvd.nist.gov/vuln/detail/CVE-2024-45490
-  # Verdict: Dangerzone is not affected. The rationale is the following:
+  # Debian tracker: https://security-tracker.debian.org/tracker/CVE-2023-45853
+  # Verdict: Dangerzone is not affected because the zlib library in Debian is
+  # built in a way that is not vulnerable.
+  - vulnerability: CVE-2023-45853
+  # CVE-2024-38428
+  # ==============
   #
-  # In order to exploit this bug, the caller must pass a negative length to the
-  # `XML_ParseBuffer` function. This function is not directly used by
-  # LibreOffice, which instead uses a higher-level wrapper. Therefore, our
-  # understanding is that this path cannot be exploited by attackers.
+  # Debian tracker: https://security-tracker.debian.org/tracker/CVE-2024-38428
+  # Verdict: Dangerzone is not affected because it doesn't use wget in the
+  # container image (which also has no network connectivity).
+  - vulnerability: CVE-2024-38428
+  # CVE-2024-57823
+  # ==============
   #
-  # See also: https://github.com/freedomofpress/dangerzone/issues/913
-  - vulnerability: CVE-2024-45490
+  # Debian tracker: https://security-tracker.debian.org/tracker/CVE-2024-57823
+  # Verdict: Dangerzone is not affected. First things first, LibreOffice is
+  # using this library for parsing RDF metadata in a document [1], and has
+  # issued a fix for the vendored raptor2 package they have for other distros
+  # [2].
+  #
+  # On the other hand, the Debian security team has stated that this is a minor
+  # issue [3], and there's no fix from the developers yet. It seems that the
+  # Debian package is not affected somehow by this CVE, probably due to the way
+  # it's packaged.
+  #
+  # [1] https://wiki.documentfoundation.org/Documentation/DevGuide/Office_Development#RDF_metadata
+  # [2] https://cgit.freedesktop.org/libreoffice/core/commit/?id=2b50dc0e4482ac0ad27d69147b4175e05af4fba4
+  # [2] From https://security-tracker.debian.org/tracker/CVE-2024-57823:
+  #
+  #       [bookworm] - raptor2 <postponed> (Minor issue, revisit when fixed upstream)
+  #
+  - vulnerability: CVE-2024-57823

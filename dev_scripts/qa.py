@@ -3,28 +3,49 @@
 import abc
 import argparse
 import difflib
+import json
 import logging
 import re
 import selectors
 import subprocess
 import sys
+import urllib.request
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+PYTHON_VERSION = "3.12"
+EOL_PYTHON_URL = "https://endoflife.date/api/python.json"
 
 CONTENT_QA = r"""## QA
 
 To ensure that new releases do not introduce regressions, and support existing
-and newer platforms, we have to do the following:
+and newer platforms, we have to test that the produced packages work as expected.
+
+Check the following:
 
 - [ ] Make sure that the tip of the `main` branch passes the CI tests.
 - [ ] Make sure that the Apple account has a valid application password and has
       agreed to the latest Apple terms (see [macOS release](#macos-release)
       section).
+
+Because it is repetitive, we wrote a script to help with the QA.
+It can run the tasks for you, pausing when it needs manual intervention.
+
+You can run it with a command like:
+
+```bash
+poetry run ./dev_scripts/qa.py {distro}-{version}
+```
+
+### The checklist
+
 - [ ] Create a test build in Windows and make sure it works:
   - [ ] Check if the suggested Python version is still supported.
   - [ ] Create a new development environment with Poetry.
   - [ ] Build the container image and ensure the development environment uses
     the new image.
+  - [ ] Download the OCR language data using `./install/common/download-tessdata.py`
   - [ ] Run the Dangerzone tests.
   - [ ] Build and run the Dangerzone .exe
   - [ ] Test some QA scenarios (see [Scenarios](#Scenarios) below).
@@ -33,6 +54,7 @@ and newer platforms, we have to do the following:
   - [ ] Create a new development environment with Poetry.
   - [ ] Build the container image and ensure the development environment uses
     the new image.
+  - [ ] Download the OCR language data using `./install/common/download-tessdata.py`
   - [ ] Run the Dangerzone tests.
   - [ ] Create and run an app bundle.
   - [ ] Test some QA scenarios (see [Scenarios](#Scenarios) below).
@@ -41,6 +63,7 @@ and newer platforms, we have to do the following:
   - [ ] Create a new development environment with Poetry.
   - [ ] Build the container image and ensure the development environment uses
     the new image.
+  - [ ] Download the OCR language data using `./install/common/download-tessdata.py`
   - [ ] Run the Dangerzone tests.
   - [ ] Create and run an app bundle.
   - [ ] Test some QA scenarios (see [Scenarios](#Scenarios) below).
@@ -49,18 +72,20 @@ and newer platforms, we have to do the following:
   - [ ] Create a new development environment with Poetry.
   - [ ] Build the container image and ensure the development environment uses
     the new image.
+  - [ ] Download the OCR language data using `./install/common/download-tessdata.py`
   - [ ] Run the Dangerzone tests.
   - [ ] Create a .deb package and install it system-wide.
   - [ ] Test some QA scenarios (see [Scenarios](#Scenarios) below).
-- [ ] Create a test build in the most recent Fedora platform (Fedora 40 as of
+- [ ] Create a test build in the most recent Fedora platform (Fedora 41 as of
   writing this) and make sure it works:
   - [ ] Create a new development environment with Poetry.
   - [ ] Build the container image and ensure the development environment uses
     the new image.
+  - [ ] Download the OCR language data using `./install/common/download-tessdata.py`
   - [ ] Run the Dangerzone tests.
   - [ ] Create an .rpm package and install it system-wide.
   - [ ] Test some QA scenarios (see [Scenarios](#Scenarios) below).
-- [ ] Create a test build in the most recent Qubes Fedora template (Fedora 39 as
+- [ ] Create a test build in the most recent Qubes Fedora template (Fedora 40 as
   of writing this) and make sure it works:
   - [ ] Create a new development environment with Poetry.
   - [ ] Run the Dangerzone tests.
@@ -102,9 +127,9 @@ Close the Dangerzone application and get the container image for that
 version. For example:
 
 ```
-$ docker images dangerzone.rocks/dangerzone:latest
+$ docker images dangerzone.rocks/dangerzone
 REPOSITORY                   TAG         IMAGE ID      CREATED       SIZE
-dangerzone.rocks/dangerzone  latest      <image ID>    <date>        <size>
+dangerzone.rocks/dangerzone  <tag>       <image ID>    <date>        <size>
 ```
 
 Then run the version under QA and ensure that the settings remain changed.
@@ -113,9 +138,9 @@ Afterwards check that new docker image was installed by running the same command
 and seeing the following differences:
 
 ```
-$ docker images dangerzone.rocks/dangerzone:latest
+$ docker images dangerzone.rocks/dangerzone
 REPOSITORY                   TAG         IMAGE ID        CREATED       SIZE
-dangerzone.rocks/dangerzone  latest      <different ID>  <newer date>  <different size>
+dangerzone.rocks/dangerzone  <other tag> <different ID>  <newer date>  <different size>
 ```
 
 #### 4. Dangerzone successfully installs the container image
@@ -234,7 +259,7 @@ Install dependencies:
   </br>
 
   The default Python version that ships with Ubuntu Focal (3.8) is not
-  compatible with PySide6, which requires Python 3.9 of greater.
+  compatible with PySide6, which requires Python 3.9 or greater.
 
   You can install Python 3.9 using the `python3.9` package.
 
@@ -262,6 +287,7 @@ methods](https://python-poetry.org/docs/#installation))_
 ```sh
 pipx ensurepath
 pipx install poetry
+pipx inject poetry poetry-plugin-export
 ```
 
 After this, restart the terminal window, for the `poetry` command to be in your
@@ -287,6 +313,12 @@ Build the latest container:
 
 ```sh
 python3 ./install/common/build-image.py
+```
+
+Download the OCR language data:
+
+```sh
+python3 ./install/common/download-tessdata.py
 ```
 
 Run from source tree:
@@ -318,10 +350,33 @@ sudo dnf install -y rpm-build podman python3 python3-devel python3-poetry-core \
     pipx qt6-qtbase-gui
 ```
 
+<table>
+  <tr>
+      <td>
+<details>
+  <summary><i>:memo: Expand this section if you are on Fedora 41.</i></summary>
+  </br>
+
+  The default Python version that ships with Fedora 41 (3.13) is not
+  compatible with PySide6, which requires Python 3.12 or earlier.
+
+  You can install Python 3.12 using the `python3.12` package.
+
+  ```bash
+  sudo dnf install -y python3.12
+  ```
+
+  Poetry will automatically pick up the correct version when running.
+</details>
+    </td>
+  </tr>
+</table>
+
 Install Poetry using `pipx`:
 
 ```sh
 pipx install poetry
+pipx inject poetry poetry-plugin-export
 ```
 
 Clone this repository:
@@ -343,6 +398,12 @@ Build the latest container:
 
 ```sh
 python3 ./install/common/build-image.py
+```
+
+Download the OCR language data:
+
+```sh
+python3 ./install/common/download-tessdata.py
 ```
 
 Run from source tree:
@@ -381,7 +442,7 @@ Install Microsoft Visual C++ 14.0 or greater. Get it with ["Microsoft C++ Build 
 Install [poetry](https://python-poetry.org/). Open PowerShell, and run:
 
 ```
-python -m pip install poetry
+python -m pip install poetry poetry-plugin-export
 ```
 
 Install git from [here](https://git-scm.com/download/win), open a Windows terminal (`cmd.exe`) and clone this repository:
@@ -401,6 +462,12 @@ Build the dangerzone container image:
 
 ```sh
 python3 .\install\common\build-image.py
+```
+
+Download the OCR language data:
+
+```sh
+python3 .\install\common\download-tessdata.py
 ```
 
 After that you can launch dangerzone during development with:
@@ -507,7 +574,7 @@ class Reference:
         # Convert spaces to dashes
         anchor = anchor.replace(" ", "-")
         # Remove non-alphanumeric (except dash and underscore)
-        anchor = re.sub("[^a-zA-Z\-_]", "", anchor)
+        anchor = re.sub("[^a-zA-Z-_]", "", anchor)
 
         return anchor
 
@@ -526,8 +593,8 @@ class QABase(abc.ABC):
 
     platforms = {}
 
-    REF_QA = Reference("RELEASE.md", content=CONTENT_QA)
-    REF_QA_SCENARIOS = Reference("RELEASE.md", content=CONTENT_QA_SCENARIOS)
+    REF_QA = Reference("QA.md", content=CONTENT_QA)
+    REF_QA_SCENARIOS = Reference("QA.md", content=CONTENT_QA_SCENARIOS)
 
     # The following class method is available since Python 3.6. For more details, see:
     # https://docs.python.org/3.6/whatsnew/3.6.html#pep-487-simpler-customization-of-class-creation
@@ -736,6 +803,10 @@ class QABase(abc.ABC):
                 self.prompt("Does it pass?", choices=["y", "n"])
         logger.info("Successfully completed QA scenarios")
 
+    @task("Download Tesseract data", auto=True)
+    def download_tessdata(self):
+        self.run("python", str(Path("install", "common", "download-tessdata.py")))
+
     @classmethod
     @abc.abstractmethod
     def get_id(cls):
@@ -762,6 +833,40 @@ class QAWindows(QABase):
         while msvcrt.kbhit():
             msvcrt.getch()
 
+    def get_latest_python_release(self):
+        with urllib.request.urlopen(EOL_PYTHON_URL) as f:
+            resp = f.read()
+            releases = json.loads(resp)
+            for release in releases:
+                if release["cycle"] == PYTHON_VERSION:
+                    # Transform the Python version string (e.g., "3.12.7") into a list
+                    # (e.g., [3, 12, 7]), and return it
+                    return [int(num) for num in release["latest"].split(".")]
+
+            raise RuntimeError(
+                f"Could not find a Python release for version {PYTHON_VERSION}"
+            )
+
+    @QABase.task(
+        f"Install the latest version of Python {PYTHON_VERSION}", ref=REF_BUILD
+    )
+    def install_python(self):
+        logger.info("Getting latest Python release")
+        try:
+            latest_version = self.get_latest_python_release()
+        except Exception:
+            logger.error("Could not verify that the latest Python version is installed")
+
+        cur_version = list(sys.version_info[:3])
+        if latest_version > cur_version:
+            self.prompt(
+                f"You need to install the latest Python version ({latest_version})"
+            )
+        elif latest_version == cur_version:
+            logger.info(
+                f"Verified that the latest Python version ({latest_version}) is installed"
+            )
+
     @QABase.task("Install and Run Docker Desktop", ref=REF_BUILD)
     def install_docker(self):
         logger.info("Checking if Docker Desktop is installed and running")
@@ -775,8 +880,8 @@ class QAWindows(QABase):
         "Install Poetry and the project's dependencies", ref=REF_BUILD, auto=True
     )
     def install_poetry(self):
-        self.run("python", "-m", "pip", "install", "poetry")
-        self.run("poetry", "install")
+        self.run("python", "-m", "pip", "install", "poetry", "poetry-plugin-export")
+        self.run("poetry", "install", "--sync")
 
     @QABase.task("Build Dangerzone container image", ref=REF_BUILD, auto=True)
     def build_image(self):
@@ -798,9 +903,11 @@ class QAWindows(QABase):
         return "windows"
 
     def start(self):
+        self.install_python()
         self.install_docker()
         self.install_poetry()
         self.build_image()
+        self.download_tessdata()
         self.run_tests()
         self.build_dangerzone_exe()
 
@@ -875,7 +982,6 @@ class QALinux(QABase):
             "--version",
             self.VERSION,
             "build",
-            "--download-pyside6",
         )
 
     @classmethod
@@ -893,6 +999,7 @@ class QALinux(QABase):
     def start(self):
         self.build_dev_image()
         self.build_container_image()
+        self.download_tessdata()
         self.run_tests()
         self.build_package()
         self.build_qa_image()
@@ -938,14 +1045,14 @@ class QAUbuntu2204(QADebianBased):
     VERSION = "22.04"
 
 
-class QAUbuntu2310(QADebianBased):
-    DISTRO = "ubuntu"
-    VERSION = "23.10"
-
-
 class QAUbuntu2404(QADebianBased):
     DISTRO = "ubuntu"
     VERSION = "24.04"
+
+
+class QAUbuntu2410(QADebianBased):
+    DISTRO = "ubuntu"
+    VERSION = "24.10"
 
 
 class QAFedora(QALinux):
@@ -965,12 +1072,12 @@ class QAFedora(QALinux):
         )
 
 
+class QAFedora41(QAFedora):
+    VERSION = "41"
+
+
 class QAFedora40(QAFedora):
     VERSION = "40"
-
-
-class QAFedora39(QAFedora):
-    VERSION = "39"
 
 
 def parse_args():

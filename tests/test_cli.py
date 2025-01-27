@@ -10,16 +10,15 @@ import tempfile
 import traceback
 from pathlib import Path
 from typing import Optional, Sequence
-from unittest import mock
 
 import pytest
 from click.testing import CliRunner, Result
+from pytest_mock import MockerFixture
 from strip_ansi import strip_ansi
 
 from dangerzone.cli import cli_main, display_banner
 from dangerzone.document import ARCHIVE_SUBDIR, SAFE_EXTENSION
 from dangerzone.isolation_provider.qubes import is_qubes_native_conversion
-from dangerzone.util import get_resource_path
 
 from .conftest import for_each_doc, for_each_external_doc
 
@@ -134,29 +133,19 @@ class TestCli:
         if os.environ.get("DUMMY_CONVERSION", False):
             args = ("--unsafe-dummy-conversion", *args)
 
-        with tempfile.TemporaryDirectory() as t:
-            tmp_dir = Path(t)
-            # TODO: Replace this with `contextlib.chdir()` [1], which was added in
-            # Python 3.11.
-            #
-            # [1]: https://docs.python.org/3/library/contextlib.html#contextlib.chdir
-            try:
-                if tmp_path is not None:
-                    cwd = os.getcwd()
-                    os.chdir(tmp_path)
+        # TODO: Replace this with `contextlib.chdir()` [1], which was added in
+        # Python 3.11.
+        #
+        # [1]: https://docs.python.org/3/library/contextlib.html#contextlib.chdir
+        try:
+            if tmp_path is not None:
+                cwd = os.getcwd()
+                os.chdir(tmp_path)
 
-                with mock.patch(
-                    "dangerzone.isolation_provider.container.get_tmp_dir",
-                    return_value=t,
-                ):
-                    result = CliRunner().invoke(cli_main, args)
-            finally:
-                if tmp_path is not None:
-                    os.chdir(cwd)
-
-                if tmp_dir.exists():
-                    stale_files = list(tmp_dir.iterdir())
-                    assert not stale_files
+            result = CliRunner().invoke(cli_main, args)
+        finally:
+            if tmp_path is not None:
+                os.chdir(cwd)
 
         # XXX Print stdout so that junitXML exports with output capturing
         # actually include the stdout + stderr (they are combined into stdout)
@@ -221,17 +210,20 @@ class TestCliConversion(TestCliBasic):
         result.assert_success()
 
     ### Test method for swallowed exception
-    def test_output_filename_same_file_dummy_fails(self) -> None:
-        resource_path = get_resource_path("dummy_document.pdf")
-        # Using the same filename for both input and output should fail.
-        result = self.run_cli(
-            [
-                resource_path,
-                "--output-filename",
-                resource_path,
-                "--unsafe-dummy-conversion",
-            ]
+    def test_output_filename_pokemon_handler(
+        self,
+        sample_pdf: str,
+        mocker: MockerFixture,
+    ) -> None:
+        """Ensure that we catch top-level errors."""
+        mock_conv = mocker.patch(
+            "dangerzone.isolation_provider.base.IsolationProvider.convert"
         )
+        mock_conv.side_effect = Exception("It happens")
+        result = self.run_cli([sample_pdf])
+        # FIXME: The following does not work, because the log is somehow not captured by
+        # Click's CliRunner.
+        # result.assert_failure(message="It happens")
         result.assert_failure()
 
     def test_output_filename_new_dir(self, sample_pdf: str) -> None:
@@ -343,6 +335,7 @@ class TestCliConversion(TestCliBasic):
 
 class TestExtraFormats(TestCli):
     @for_each_external_doc("*hwp*")
+    @pytest.mark.flaky(reruns=2)
     def test_hancom_office(self, doc: str) -> None:
         if is_qubes_native_conversion():
             pytest.skip("HWP / HWPX formats are not supported on this platform")

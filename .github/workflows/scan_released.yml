@@ -6,23 +6,36 @@ on:
 
 jobs:
   security-scan-container:
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - runs-on: ubuntu-latest
+            arch: i686
+          # Do not scan Silicon mac for now to avoid masking release scan results for other plaforms.
+          # - runs-on: macos-latest
+          #   arch: arm64
+    runs-on: ${{ matrix.runs-on }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - name: Download container image for the latest release
+      - name: Download container image for the latest release and load it
         run: |
-          VERSION=$(curl https://api.github.com/repos/freedomofpress/dangerzone/releases/latest | jq -r '.tag_name')
-          wget https://github.com/freedomofpress/dangerzone/releases/download/${VERSION}/container.tar.gz
-      - name: Load container image
-        run: docker load -i container.tar.gz
+          VERSION=$(curl https://api.github.com/repos/freedomofpress/dangerzone/releases/latest | grep "tag_name" | cut -d '"' -f 4)
+          CONTAINER_FILENAME=container-${VERSION:1}-${{ matrix.arch }}.tar.gz
+          wget https://github.com/freedomofpress/dangerzone/releases/download/${VERSION}/${CONTAINER_FILENAME} -O ${CONTAINER_FILENAME}
+          docker load -i ${CONTAINER_FILENAME}
+      - name: Get image tag
+        id: tag
+        run: |
+          tag=$(docker images dangerzone.rocks/dangerzone --format '{{ .Tag }}')
+          echo "tag=$tag" >> $GITHUB_OUTPUT
       # NOTE: Scan first without failing, else we won't be able to read the scan
       # report.
       - name: Scan container image (no fail)
-        uses: anchore/scan-action@v4
+        uses: anchore/scan-action@v6
         id: scan_container
         with:
-          image: "dangerzone.rocks/dangerzone:latest"
+          image: "dangerzone.rocks/dangerzone:${{ steps.tag.outputs.tag }}"
           fail-build: false
           only-fixed: false
           severity-cutoff: critical
@@ -30,13 +43,13 @@ jobs:
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: ${{ steps.scan_container.outputs.sarif }}
-          category: container
+          category: container-${{ matrix.arch }}
       - name: Inspect container scan report
         run: cat ${{ steps.scan_container.outputs.sarif }}
       - name: Scan container image
-        uses: anchore/scan-action@v4
+        uses: anchore/scan-action@v6
         with:
-          image: "dangerzone.rocks/dangerzone:latest"
+          image: "dangerzone.rocks/dangerzone:${{ steps.tag.outputs.tag }}"
           fail-build: true
           only-fixed: false
           severity-cutoff: critical
@@ -55,7 +68,7 @@ jobs:
       # NOTE: Scan first without failing, else we won't be able to read the scan
       # report.
       - name: Scan application (no fail)
-        uses: anchore/scan-action@v4
+        uses: anchore/scan-action@v6
         id: scan_app
         with:
           path: "."
@@ -70,7 +83,7 @@ jobs:
       - name: Inspect application scan report
         run: cat ${{ steps.scan_app.outputs.sarif }}
       - name: Scan application
-        uses: anchore/scan-action@v4
+        uses: anchore/scan-action@v6
         with:
           path: "."
           fail-build: true

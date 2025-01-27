@@ -32,7 +32,7 @@ Name:           dangerzone-qubes
 Name:           dangerzone
 %endif
 
-Version:        0.7.1
+Version:        0.8.1
 Release:        1%{?dist}
 Summary:        Take potentially dangerous PDFs, office documents, or images and convert them to safe PDFs
 
@@ -72,13 +72,12 @@ BuildRequires:  python3-devel
 %if 0%{?_qubes}
 # Qubes-only requirements (server-side)
 Requires:       python3-magic
-Requires:       python3-PyMuPDF
 Requires:       libreoffice
-# Qubes-only requirements (client-side)
-Requires:       GraphicsMagick
-Requires:       ghostscript
-Requires:       poppler-utils
-Requires:       tesseract
+%else
+# Container-only requirements
+Requires:       podman
+%endif
+
 # Explicitly require every tesseract model:
 # See: https://github.com/freedomofpress/dangerzone/issues/431
 Requires:       tesseract-langpack-afr
@@ -204,10 +203,6 @@ Requires:       tesseract-langpack-uzb_cyrl
 Requires:       tesseract-langpack-vie
 Requires:       tesseract-langpack-yid
 Requires:       tesseract-langpack-yor
-%else
-# Container-only requirements
-Requires:       podman
-%endif
 
 %description
 Dangerzone is an open source desktop application that takes potentially
@@ -220,6 +215,12 @@ convert the documents within a secure sandbox.
 
 %prep
 %autosetup -p1 -n dangerzone-%{version}
+
+# Bypass the version pin for Fedora as the 6.8.1.1 package is causing trouble
+# A 6.8.1.1 package was only released with a wheel for macOS, but was picked by
+# Fedora packagers. We cannot use "*" when PyPI is involved as it will fail to download the latest version.
+# For Fedora, we can pick any of the released versions.
+ sed -i '/shiboken6 = \[/,/\]/c\shiboken6 = "*"' pyproject.toml
 
 %generate_buildrequires
 %pyproject_buildrequires -R
